@@ -1,0 +1,18 @@
+# macOS metadata
+.DS_Store
+
+# Python bytecode and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node dependencies
+node_modules
+
+# Office lock files
+.~*.xlsx
+
+# Generated presentation QA and rendering intermediates
+weather_assignment/.chart-data-*/
+weather_assignment/tmp/
