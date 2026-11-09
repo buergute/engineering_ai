@@ -1,18 +1,30 @@
-# macOS metadata
-.DS_Store
+# 数据不进仓库（Kelmarsh 约 3.8 GB）
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.parquet
+*.zip
 
-# Python bytecode and environments
+# 训练产物与输出
+outputs/
+artifacts/
+*.pkl
+*.joblib
+*.txt.model
+
+# Python
 __pycache__/
-*.py[cod]
+*.pyc
+.pytest_cache/
 .venv/
 venv/
+.ipynb_checkpoints/
 
-# Node dependencies
-node_modules
+# 密钥
+.env
 
-# Office lock files
-.~*.xlsx
-
-# Generated presentation QA and rendering intermediates
-weather_assignment/.chart-data-*/
-weather_assignment/tmp/
+# 系统
+.DS_Store
+.idea/
+.vscode/

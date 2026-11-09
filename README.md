@@ -1,108 +1,89 @@
+# 数据质量感知的风电功率预测与异常复核智能体
 
-# Engineering AI Projects
+工程域人工智能课程项目。风机数据经常缺失、卡住或漂移，这时普通的预测模型照样会给出一个看起来很精确的数字。本项目做一个能判断“这个预测还能不能信”的智能体：
 
-工程数据处理、时间序列建模与风速预测项目集合。
+- **预测**：风机未来 10 / 30 / 60 分钟的功率，同时给出可信区间；数据质量越差，区间越宽，必要时换用后备模型。
+- **复核**：发电偏低时，区分是限电、风小、传感器问题还是原因不明，并列出证据。
+- **补查与降级**：证据不足时主动补查；补查后仍判断不了，就如实输出“无法确定”。所有数字都来自工具计算，大模型不生成数字。
 
-This repository contains projects for engineering data processing, time-series modeling, and wind-speed forecasting.
+数据：[Kelmarsh 风电场 SCADA v4](https://zenodo.org/records/16807551)，6 台机组，10 分钟分辨率。
 
-## 项目内容 | Projects
+## 系统流程
 
-仓库目前包含两个主要工作流：
-
-This repository currently contains two main workflows:
-
-1. **水位时间序列分析（仓库根目录） / Water-level time-series analysis (repository root)**：清洗三峡、高坝洲和沙市水位数据，构造连续 7 天输入窗口，并比较 FCNN、LSTM、GRU、TCN 模型以及特征工程方案。
-2. **天气作业（`weather_assignment/`） / Weather assignment (`weather_assignment/`)**：使用美国 Iowa Environmental Mesonet 的 CNC 站观测数据，对风速进行两天提前量预测，并导出预测结果和作业文件。
-
-## 目录结构 | Repository layout
-
-| 路径 / Path | 内容 / Contents |
-| --- | --- |
-| `data/` | 水位原始/清洗后表格、预处理数据和缩放参数 / Water-level source and processed tables, model inputs, and scaling parameters |
-| `data_cleaning.py` | 清洗原始 Excel 表格，生成 `data/Processed.xlsx` / Clean the source Excel workbook and create `data/Processed.xlsx` |
-| `data_cleaning(2).py` | 生成 7 天窗口、缺失值处理和特征缩放的 9 种组合 / Generate seven-day windows across nine missing-value and scaling combinations |
-| `output/` | FCNN 与多模型比较脚本、训练结果、图表和预测表 / FCNN and model-comparison scripts, results, plots, and prediction tables |
-| `output_feature_eng/` | 特征工程实验脚本及其结果 / Feature-engineering experiment and results |
-| `weather_assignment/data/` | CNC 站风速及气象观测 CSV / CNC wind and weather observation CSV |
-| `weather_assignment/forecast.py` | 风速预测、时间顺序验证与测试 / Wind forecasting with chronological validation and testing |
-| `weather_assignment/output/` | 预测结果、模型报告及导出的作业文件 / Forecasts, model report, and assignment deliverables |
-
-## 环境要求 | Requirements
-
-仓库没有锁定依赖版本或提供依赖清单。水位建模脚本使用 Python、NumPy、pandas、openpyxl、Matplotlib、scikit-learn 和 PyTorch；天气预测脚本使用 Python、NumPy、pandas 和 scikit-learn。请按你的操作系统和硬件安装合适的 PyTorch 版本。
-
-This repository does not pin dependency versions or include a dependency manifest. The water-level modeling scripts use Python, NumPy, pandas, openpyxl, Matplotlib, scikit-learn, and PyTorch. The weather forecasting script uses Python, NumPy, pandas, and scikit-learn. Install the PyTorch build appropriate for your operating system and hardware.
-
-例如，可先安装常用 Python 依赖：
-
-For example, install the common Python dependencies with:
-
-```bash
-python -m pip install numpy pandas openpyxl matplotlib scikit-learn
+```
+① 理解请求 → ② 读数据 → ③ 质检 → ④ 编排决策
+                                      │ 需要时补查（最多 3 次）
+                                      ▼
+                    ⑤ 功率曲线复核 · ⑥ 查证据 · ⑦ 预测（含区间）
+                                      │
+                                      ▼
+                     ⑧ 独立校验 ──不通过──→ 重做或降级
+                          │ 通过
+                          ▼
+                     ⑨ 生成报告 / 界面
 ```
 
-PyTorch 请根据设备选择对应安装方式。以下命令均假设当前目录为仓库根目录。
-
-Install PyTorch using the option appropriate for your device. The commands below assume you are in the repository root.
-
-## 运行方式 | Run the workflows
-
-### 水位数据处理 | Water-level data preparation
-
-`data_cleaning.py` 优先查找 `data/Original.xlsx`，如果不存在则使用仓库中提供的 `data/Original(1).xlsx`。运行：
-
-`data_cleaning.py` first looks for `data/Original.xlsx` and falls back to the included `data/Original(1).xlsx`. Run:
+## 快速开始
 
 ```bash
-python data_cleaning.py
-python 'data_cleaning(2).py'
+git clone https://github.com/buergute/engineering_ai.git
+cd engineering_ai
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+pytest                                                  # 跑测试
+python -m agent.run --mock curtailment                  # 用假工具跑演示场景
+streamlit run ui/app.py                                 # 打开界面
 ```
 
-第二个脚本读取 `data/Processed.xlsx`，按时间排序，使用前 7 天的三站水位预测沙市下一天水位，并生成 9 组缺失值处理/特征缩放数据及其参数文件。
+在真实工具完成前，`--mock` 可选四个场景：
 
-The second script reads `data/Processed.xlsx`, sorts rows by time, uses the previous seven days of three-station levels to predict the next day's Shashi level, and generates nine datasets with their preprocessing parameters.
+| 场景 | 内容 | 期望行为 |
+| --- | --- | --- |
+| `curtailment` | T03 风速读数冻结，起报前有限功率记录 | 判定主因是限电，风速冻结单独报告，换用后备模型 |
+| `no_event` | T03 风速读数冻结，查不到事件 | 输出“原因无法确定”并列出候选原因 |
+| `normal` | 数据正常 | 走常规流程，不补查 |
+| `tool_failure` | 事件查询工具一直失败 | 重试一次后降级，报告未完成项 |
 
-### 水位模型实验 | Water-level model experiments
+假工具里的数值都是编的，只用来演示流程，不能写进报告结果。
 
-以下脚本从仓库根目录运行：
+## 仓库结构与分工
 
-Run these scripts from the repository root:
+| 目录 | 内容 | 负责人 |
+| --- | --- | --- |
+| `common/` | 公共返回格式 `ToolResult`、禁止读未来数据的检查、配置读取 | C（格式三人共同确认） |
+| `configs/split.yaml` | 全组唯一的训练 / 验证 / 校准 / 测试时间切分 | A |
+| `data/` | 原始和处理后的数据（不进仓库） | A |
+| `tools/` | ② `read_asof`、③ `check_quality`、⑤ `check_power_curve`、⑥ `query_evidence` | A |
+| `perturb/` | 四类扰动注入：随机缺失、连续掉线、读数冻结、缓慢偏移 | A |
+| `tasks/` | 24 个智能体测试任务和标准答案 | A |
+| `models/` | 持续性和补值基线、质量感知分位数模型、后备模型、⑦ `forecast_power` | B |
+| `eval/` | 数值指标（MAE、RMSE、pinball、覆盖率）和结果表 1 | B |
+| `agent/` | ④ 状态机、⑧ 校验、⑨ 报告、假工具、命令行入口 | C |
+| `ui/` | Streamlit 界面 | C |
+| `agent_eval/` | 任务运行器、三组对照和结果表 2 | C |
+| `docs/` | 接口约定、数据说明与字段字典 | 全组 |
+| `tests/` | 测试 | 各自负责自己的模块 |
 
-```bash
-python output/compare_timeseries_models.py
-python output_feature_eng/feature_engineering_experiment.py
-```
+还没实现的函数都写了 `TODO(负责人)` 和返回格式说明，直接在原文件里填。
 
-模型比较脚本训练 FCNN、LSTM、GRU 和 TCN，并在 `output/model_comparison/` 保存指标、预测表和图表。特征工程脚本比较基线 FCNN 与加入窗口统计、差分及日历特征的 FCNN，结果保存在 `output_feature_eng/`。
+## 开发约定
 
-The model-comparison script trains FCNN, LSTM, GRU, and TCN models and writes metrics, prediction tables, and plots to `output/model_comparison/`. The feature-engineering script compares a baseline FCNN with an FCNN that also uses window statistics, differences, and calendar features; results are written to `output_feature_eng/`.
+1. **不许偷看未来。** 所有读数据、查事件的地方都要用 `common.schema.ensure_not_future` 检查。功率曲线、邻机关系、补值和模型只用 `train` 段拟合，阈值只在 `val` 段上选。
+2. **接口 11/8 冻结。** 格式见 `docs/interface.md`。之后要改得三人同意，并同步改假工具和测试。
+3. **查不到就说查不到。** 空结果返回 `status="empty"`，不编造数据，也不编造证据编号。
+4. **一人一块目录。** 改别人的目录先在群里说一声。
+5. **合并前跑 `pytest`。** 每个工具附一个测试；不直接往 `main` 推，开分支提 PR，至少让另一个人跑过。
+6. **11/23 冻结代码。** 之后只修 bug、写报告、做演示。
 
-`output/train_fcnn.py` 是单独的 FCNN 训练脚本，其输入、参数和输出路径目前写成了原开发环境的绝对路径。在其他机器上运行前，需要在脚本顶部将这些路径改为本地路径。
+## 进度
 
-`output/train_fcnn.py` is a standalone FCNN training script whose input, parameter, and output paths are currently absolute paths from the original development environment. Update the paths near the top of the script before running it elsewhere.
-
-### 天气风速预测 | Weather wind-speed forecast
-
-确保 `weather_assignment/data/CNC_IEM_2024-2026.csv` 存在后，在仓库根目录运行：
-
-With `weather_assignment/data/CNC_IEM_2024-2026.csv` in place, run from the repository root:
-
-```bash
-python weather_assignment/forecast.py
-```
-
-脚本按预测起点顺序划分训练、验证和测试数据，比较直方图梯度提升与随机森林，并将预测及报告写入 `weather_assignment/output/`。当前预测起点和目标日期在脚本中配置；如用于新日期，请先检查并更新 `weather_assignment/forecast.py` 中的 `ISSUE` 和日期范围。
-
-The script splits data chronologically, compares histogram gradient boosting with random forest, and writes forecasts and a report to `weather_assignment/output/`. The forecast origin and target date are configured in the script; review and update `ISSUE` and the date ranges in `weather_assignment/forecast.py` before using it for a new forecast date.
-
-## 已有结果 | Included results
-
-仓库已包含若干预处理数据、训练好的模型、评估表格、图表和作业导出文件。它们是当前实验的保存结果；重新运行脚本可能会覆盖相应输出。
-
-The repository includes prepared datasets, trained models, evaluation tables, plots, and assignment exports. These are saved outputs from the current experiments; rerunning scripts may overwrite the corresponding files.
-
-## 注意事项 | Notes
-
-- `.gitignore` 排除了系统文件、Python 缓存、Node.js 依赖目录，以及天气作业的临时渲染和验证文件。/ `.gitignore` excludes system files, Python caches, Node.js dependencies, and temporary weather-assignment render and validation files.
-- `weather_assignment/fill_template.py` 和演示文稿构建脚本依赖原开发环境中的模板或工具路径；使用这些辅助脚本前，请检查脚本中的路径和依赖。/ `weather_assignment/fill_template.py` and the presentation-building scripts depend on template or tool paths from the original development environment. Check their paths and dependencies before using them.
-- 结果文件名中的 `姓名`、`布尔古特` 等是当前导出文件的名称，不是脚本自动识别的用户信息。/ Names such as `姓名` and `布尔古特` in the exported filenames are part of the current filenames; scripts do not infer user identity from them.
+- [x] 仓库骨架、公共格式、假工具，能跑通的最小流程
+- [ ] 数据回放一天（A，11/7）
+- [ ] 字段字典和时间切分（A，11/9）
+- [ ] 持续性基线（B，11/9）
+- [ ] 真实数据跑通基线（全组检查点，11/12）
+- [ ] 演示场景端到端跑通（全组检查点，11/19）
+- [ ] 结果表 1、结果表 2（11/22）
+- [ ] 代码冻结（11/23）
+- [ ] 报告、PPT、录屏（11/25）

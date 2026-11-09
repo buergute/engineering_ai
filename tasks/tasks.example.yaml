@@ -1,0 +1,20 @@
+# 智能体测试任务格式示例（负责人：A，24 题截止 11/18）
+# 题目分布：normal 6 / missing_field 4 / quality 5 / conflict 4 / tool_failure 3 / future_leak 2
+# 每题写清：输入、应调用的工具、应得结论。数字和时间由程序自动评分，
+# 解释是否正确由 A、B 对照 expected 各自独立打分。
+
+- id: Q-001
+  category: quality
+  request: "预测 T03 未来一小时的功率，并解释它为什么比相邻机组低"
+  turbine: T03
+  as_of: "2019-07-14T14:00"
+  inject: null                     # 或 {type: freeze, field: wind_speed, ...}
+  simulate_tool_failure: null      # 或 "query_evidence"
+  expected:
+    must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result]
+    must_not: [read_future]
+    use_fallback_model: true
+    primary_cause: curtailment     # curtailment / sensor_fault / low_wind / undetermined
+    flags: [wind_speed_frozen]
+    allowed_verdicts: [confirmed_cause, undetermined]
+  notes: "示例题，数值仅为示意；正式题目要用真实数据核对答案"
