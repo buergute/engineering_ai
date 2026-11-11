@@ -57,6 +57,12 @@ if go:
             st.write(out["diagnosis"]["text"])
             for f in out["diagnosis"]["findings"]:
                 st.warning(f["text"])
+                st.caption("证据：" + ", ".join(f.get("evidence", [])))
+            context = out.get("context")
+            if context and context.status == "ok":
+                st.markdown("#### 可疑点复核证据")
+                st.json({k: context.result.get(k) for k in ("power_jump", "neighbor_sync", "turbulence", "operation")})
+                st.caption("证据：" + ", ".join(context.evidence_ids))
             if not out["validation"]["ok"]:
                 st.error(out["validation"]["errors"])
     st.markdown("#### 执行轨迹")

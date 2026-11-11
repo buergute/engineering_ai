@@ -1,9 +1,9 @@
 """⑨ 生成报告（负责人：C）。目前是模板输出；之后可让大模型润色措辞，但不许改数字。"""
 from __future__ import annotations
 
-VERDICT_CN = {"normal": "正常", "data_issue_only": "数据问题（已调整预测）", "operating_change": "运行状态变化",
-              "undetermined": "无法解释（建议人工核查）", "need_clarification": "需要补充信息", "out_of_scope": "超出能力范围",
-              "failed_explicit": "未能完成"}
+VERDICT_CN = {"normal": "正常", "data_issue_only": "数据变差（已调整预测）", "operating_change": "运行状态变化",
+              "undetermined": "无法解释（建议人工核查）", "need_clarification": "需要补充信息", "out_of_scope": "需要补充信息",
+              "failed_explicit": "无法完成"}
 
 
 def render_report(out: dict) -> str:
