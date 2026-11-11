@@ -33,8 +33,6 @@ def coverage(y, lower, upper) -> float:
 
 def mean_width(lower, upper) -> float:
     return float(np.mean(np.asarray(upper, float) - np.asarray(lower, float)))
-
-
 def daily_block_bootstrap(dates, *arrays, statistic, n_bootstrap: int = 2000,
                           confidence: float = 0.95, seed: int = 0):
     """按日期整块重采样，返回统计量及百分位置信区间。

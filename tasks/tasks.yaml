@@ -1,0 +1,366 @@
+# 智能体测试任务 v2（26 题）——负责人：A
+#
+# 题型分布：normal 2 / wind_change 4 / missing_field 4 / quality 6 / operating 3 / unexplained 2 / tool_failure 3 / future_leak 2
+# 起报时刻全部取自 test 段（2023 年），由 agent_eval/pick.py 按 pick_rule 自动挑选，结果写到 outputs/
+#   pick_rule.kind:
+#     clean               指定机组及邻机数据完整、前后无任何事件或真值异常（含阵风、全场风速突变），再加风速/功率条件
+#     wind_event          起报前 1 小时内有明显功率突变，原因只是风（event: gust 单机阵风 | wind_ramp 全场风速突变），无其他异常
+#     curtailment_active  任一机组正处于有日志的限电中（机组号由挑选结果决定）
+#     stop_active         任一机组正处于有日志的停机中
+#     hidden_derate       任一机组正处于未记录的欠发中（只有真值表知道）
+#     same_as             与另一题同一时刻、同一机组
+# request 里的 {turbine} 会替换成挑中的机组号；inject 里的 $turbine / $neighbor0 同理
+#
+# 复核的四类结论与对应的 verdict：
+#   数据问题 → data_issue_only；运行状态变化 → operating_change；
+#   风况变化（正常）→ normal + primary_cause=wind_change；无法解释 → undetermined（建议人工核查，不给原因）
+# expected：verdict / primary_cause 可写成列表（任一即可）；flags 是“至少包含”
+# 注意：“数据变差时区间应更宽”是分布层面的结论（平均更宽、覆盖率不降），由 eval/numeric.py 的结果表 1 检验；
+#       单题只检查系统是否识别出数据变差、启用了 degraded 校准分组，不做逐点宽度比较
+# checks：具名的自动检查，实现见 agent_eval/checks.py
+# rubric：A、B 对照各自独立人工打分，不参与自动评分
+
+
+# ───────────────────────── normal ─────────────────────────
+
+- id: N01
+  category: normal
+  title: 满发工况，预测不超过额定功率
+  request: "{turbine} 现在风很大，未来一小时能发多少？"
+  pick_rule: {kind: clean, turbine: T05, wind: [13.5, 20], power_min: 1.95}
+  expected: {verdict: normal, primary_cause: none, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [query_evidence], max_followups: 0}
+  checks: [{check: p50_max, value: 2.091}, {check: upper_max, value: 2.153}]
+  rubric: ["提到已接近额定功率，继续增风不会再增加出力"]
+
+- id: N02
+  category: normal
+  title: 用户要求 kW 单位
+  request: "用 kW 告诉我 {turbine} 未来 30 分钟的功率"
+  pick_rule: {kind: clean, turbine: T01, wind: [7, 11]}
+  expected: {verdict: normal, primary_cause: none, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [], max_followups: 0}
+  checks: [{check: horizons, value: [30]}, {check: unit_kw}]
+  rubric: ["只回答了 30 分钟这个时距"]
+
+# ───────────────────────── wind_change：功率变化很大，但只是风变了，不是异常 ─────────────────────────
+
+- id: W01
+  category: wind_change
+  title: 单机阵风：功率突然上升，邻机没变
+  request: "{turbine} 功率突然跳了一下，是不是出问题了？"
+  pick_rule: {kind: wind_event, event: gust, direction: up, min_jump_mw: 1.1, wind: [4, 11]}
+  expected: {verdict: normal, primary_cause: wind_change, flags: [suspicious_but_wind_change], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, review_context, forecast_power, validate_result],
+             must_not_call: [], max_followups: 1}
+  checks: [{check: report_contains, value: "湍流"}, {check: report_not_contains, value: "建议人工核查"}]
+  rubric: ["给出了功率与功率曲线相符、风速标准差偏大的证据", "明确说不是设备异常", "没有把阵风说成故障"]
+
+- id: W02
+  category: wind_change
+  title: 全场风速突降：功率大幅下降，所有机组一起降
+  request: "{turbine} 功率一下子掉了很多，要不要派人去看？"
+  pick_rule: {kind: wind_event, event: wind_ramp, direction: down, min_jump_mw: 1.1, wind: [3.5, 13]}
+  expected: {verdict: normal, primary_cause: wind_change, flags: [suspicious_but_wind_change], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, review_context, forecast_power, validate_result],
+             must_not_call: [], max_followups: 1}
+  checks: [{check: report_contains, value: "邻机同步变化"}, {check: report_not_contains, value: "建议人工核查"}]
+  rubric: ["用邻机同步下降作为证据", "回答了不需要因此派人检查，并给出下降后的预测"]
+
+- id: W03
+  category: wind_change
+  title: 全场风速突升：功率大幅上升
+  request: "预测 {turbine} 未来一小时的功率，刚才功率涨得很快"
+  pick_rule: {kind: wind_event, event: wind_ramp, direction: up, min_jump_mw: 1.1, wind: [3.5, 13]}
+  expected: {verdict: normal, primary_cause: wind_change, flags: [suspicious_but_wind_change], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, review_context, forecast_power, validate_result],
+             must_not_call: [], max_followups: 1}
+  checks: [{check: report_contains, value: "判断为风况变化"}, {check: interval_order}]
+  rubric: ["把功率上升解释为风速上升，没有当成异常", "说明风速快速变化时预测更不确定"]
+
+
+- id: W04
+  category: wind_change
+  title: 用户怀疑故障，其实是全场风小
+  request: "{turbine} 现在功率很低，是不是出问题了？"
+  pick_rule: {kind: clean, turbine: T05, wind: [3.5, 4.8], all_wind_range: [3.0, 5.5]}
+  expected: {verdict: normal, primary_cause: low_wind, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, forecast_power, validate_result],
+             must_not_call: [], max_followups: 1}
+  checks: [{check: residual_abs_max, value: 0.3}]
+  rubric: ["用邻机同样偏低、功率曲线吻合来说明是风小", "明确回答没有发现故障迹象"]
+
+
+# ───────────────────────── missing_field ─────────────────────────
+
+- id: M01
+  category: missing_field
+  title: 没说是哪台机组
+  request: "预测一下未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T01}
+  expected: {verdict: need_clarification, must_call: [], must_not_call: [read_asof, forecast_power]}
+  checks: [{check: no_forecast}, {check: message_contains, value: ["T01", "T06"]}]
+  rubric: ["没有自行假定某台机组或全场总功率"]
+
+
+- id: M02
+  category: missing_field
+  title: 没给起报时刻
+  request: "T03 后面一小时会怎么样？"
+  pick_rule: {kind: none}           # 本题故意不提供 as_of
+  expected: {verdict: need_clarification, must_call: [], must_not_call: [read_asof, forecast_power]}
+  checks: [{check: no_forecast}, {check: message_contains, value: ["起报时刻"]}]
+  rubric: ["没有默认使用数据集最后一条记录作为“现在”"]
+
+
+- id: M03
+  category: missing_field
+  title: 机组编号不存在
+  request: "预测 T08 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T01}
+  expected: {verdict: need_clarification, must_call: [], must_not_call: [forecast_power]}
+  checks: [{check: no_forecast}, {check: message_contains, value: ["T08", "T01"]}]
+  rubric: ["没有把 T08 偷换成相近的机组"]
+
+
+- id: M04
+  category: missing_field
+  title: 预测时距超出范围
+  request: "预测 {turbine} 未来 6 小时的功率"
+  pick_rule: {kind: clean, turbine: T04}
+  expected: {verdict: out_of_scope, must_call: [], must_not_call: [forecast_power]}
+  checks: [{check: no_forecast}, {check: message_contains, value: ["60"]}]
+  rubric: ["说明系统支持的时距"]
+
+
+# ───────────────────────── quality ─────────────────────────
+
+- id: D01
+  category: quality
+  title: 风速冻结，但功率其实正常
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T03, wind: [6, 10], wind_range_2h_min: 1.5}
+  inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
+  paired_clean: true
+  expected: {verdict: data_issue_only, primary_cause: sensor_fault, flags: [wind_speed_frozen],
+             use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: curve_wind_source, value: neighbors}, {check: residual_abs_max, value: 0.3}]
+  rubric: ["指出风速读数疑似冻结，并以邻机对比为证据", "说明功率与邻机推算的风速相符，没有欠发",
+           "建议检查风速计或数据采集链路"]
+
+
+- id: D02
+  category: quality
+  title: 起报前 2 小时全部通道掉线
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T03, wind: [6, 10]}
+  inject: [{type: contiguous_dropout, turbine: $turbine, fields: all, duration_min: 120}]
+  paired_clean: true
+  expected: {verdict: data_issue_only, primary_cause: data_gap, flags: [data_gap], use_fallback_model: true,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: calibration_group, value: degraded}]   # 区间“平均更宽、覆盖不降”由结果表 1 检验，不做单点比较
+  rubric: ["没有用补值后的数据假装数据完整", "说明预测主要依据邻机，可信度下降"]
+
+
+- id: D03
+  category: quality
+  title: 风速缓慢漂移（误判陷阱，训练时没见过这类扰动）
+  request: "{turbine} 最近发电好像比曲线低，未来一小时会怎样？"
+  pick_rule: {kind: clean, turbine: T03, wind: [6, 10], clean_hours_before: 76}
+  inject: [{type: slow_drift, turbine: $turbine, field: wind_speed, drift_per_day: 0.5, days: 3}]
+  paired_clean: true
+  expected: {verdict: data_issue_only, primary_cause: sensor_fault,
+             flags: [wind_speed_drift_suspected], use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: verdict_not, value: operating_change}, {check: report_not_contains, value: "功率明显偏低"}]
+  rubric: ["注意到风速比邻机系统性偏高，而功率与邻机一致", "把风速计漂移列为首要候选，而不是断定机组欠发"]
+
+
+- id: D04
+  category: quality
+  title: 功率读数冻结
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T06, wind: [6, 10], power_range_1h_min: 0.2}
+  inject: [{type: freeze, turbine: $turbine, field: power, duration_min: 60}]
+  paired_clean: true
+  expected: {verdict: data_issue_only, primary_cause: sensor_fault, flags: [power_frozen],
+             use_fallback_model: null,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: calibration_group, value: degraded}]
+  rubric: ["没有简单地把冻结值当作当前功率外推", "建议核查功率变送器或数据链路"]
+
+
+- id: D05
+  category: quality
+  title: 两个风速计读数矛盾
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T02, wind: [6, 10]}
+  inject: [{type: anemometer_mismatch, turbine: $turbine, factor: 0.25, duration_min: 60}]
+  paired_clean: true
+  expected: {verdict: data_issue_only, primary_cause: sensor_fault, flags: [wind_sensors_disagree],
+             use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: curve_wind_source, value: neighbors}, {check: report_not_contains, value: "功率明显偏低"}]
+  rubric: ["指出风速计 1 与 2 读数不一致，并给出差值", "没有断定其中某一个是对的，改用邻机推算风速"]
+
+
+- id: D06
+  category: quality
+  title: 本机和一台邻机风速都冻结
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T03, wind: [6, 10], wind_range_2h_min: 1.5}
+  inject:
+    - {type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}
+    - {type: freeze, turbine: $neighbor0, field: wind_speed, duration_min: 80}
+  expected: {verdict: data_issue_only, primary_cause: sensor_fault, flags: [wind_speed_frozen, neighbor_unreliable],
+             use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: curve_excludes, value: $neighbor0}]
+  rubric: ["发现邻机也冻结，没有拿它当证据", "说明可用证据变少、可信度下降"]
+
+
+# ───────────────────────── operating：运行状态变化（限电、停机、事后补录的日志） ─────────────────────────
+
+- id: O01
+  category: operating
+  title: 演示场景：限电 + 风速冻结
+  request: "预测 {turbine} 未来一小时的功率，并解释它为什么比相邻机组低"
+  pick_rule: {kind: curtailment_active, min_elapsed_min: 90, min_remaining_min: 60, deficit_min: 0.6}
+  inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
+  expected: {verdict: operating_change, primary_cause: curtailment, flags: [wind_speed_frozen],
+             use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: cites_event_type, value: curtailment}, {check: p50_within_setpoint}]
+  rubric: ["把“限电导致低功率”和“风速冻结”分开报告", "没有说成“传感器故障导致功率低”", "建议向调度确认限电何时解除"]
+
+
+- id: O02
+  category: operating
+  title: 日志里有停机，功率为零
+  request: "{turbine} 功率是 0，什么情况？未来一小时会怎样？"
+  pick_rule: {kind: stop_active, min_elapsed_min: 40, min_remaining_min: 30, deficit_min: 0.5}
+  expected: {verdict: operating_change, primary_cause: stop, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, review_context, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: cites_event_type, value: stop}, {check: report_contains, value: "停机"}]
+  rubric: ["说明风速足够发电，功率为零是因为停机", "没有把停机说成传感器故障", "说明停机何时结束未知，预测只是参考"]
+
+- id: O03
+  category: operating
+  title: 限电日志事后才补录：起报时看不到日志，只能靠桨距角判断
+  request: "{turbine} 比旁边几台低了不少，是什么原因？"
+  pick_rule: {kind: curtailment_active, min_elapsed_min: 90, min_remaining_min: 60, deficit_min: 0.6}
+  inject: [{type: hide_active_event, turbine: $turbine, event_type: curtailment, available_after_as_of_min: 80}]
+  expected: {verdict: operating_change, primary_cause: curtailment, flags: [evidence_from_fields_only],
+             use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, review_context, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: not_cite_injected}, {check: report_contains, value: "桨距角"}, {check: report_contains, value: "设定值未知"}]
+  rubric: ["用桨距角偏大、风速低于额定作为证据，而不是引用还看不到的日志", "明确说日志没有记录、设定值未知"]
+
+
+# ───────────────────────── unexplained：找不到证据，如实说无法解释 ─────────────────────────
+
+- id: U01
+  category: unexplained
+  title: 真实欠发，证据不足（无法下结论案例）
+  request: "{turbine} 比旁边几台低了不少，是什么原因？"
+  pick_rule: {kind: hidden_derate, min_elapsed_min: 60, deficit_min: 0.25}
+  expected: {verdict: undetermined, primary_cause: unknown, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: residual_max, value: -0.2}, {check: report_contains, value: "无法解释"}]
+  rubric: ["确认欠发存在并给出残差和邻机对比", "列出候选原因", "给出能消除不确定性的下一步检查项"]
+
+
+- id: U02
+  category: unexplained
+  title: 日志说限电，但功率没被压住
+  request: "{turbine} 是不是在限电？未来一小时会怎样？"
+  pick_rule: {kind: clean, turbine: T02, wind: [9, 12], power_range: [1.4, 1.9]}
+  inject: [{type: add_event, turbine: $turbine, event_type: curtailment, setpoint_mw: 1.0, start_before_as_of_min: 60}]
+  expected: {verdict: undetermined, primary_cause: unknown, flags: [evidence_conflict], use_fallback_model: false,
+             must_call: [read_asof, check_quality, query_evidence, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: verdict_not, value: operating_change}]
+  rubric: ["指出记录与实际功率矛盾", "给出可能解释并建议向调度核实"]
+
+
+# ───────────────────────── tool_failure ─────────────────────────
+
+- id: F01
+  category: tool_failure
+  title: 事件查询一直失败
+  request: "预测 {turbine} 未来一小时的功率，并解释它为什么比相邻机组低"
+  pick_rule: {kind: same_as, id: O01}
+  inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
+  tool_faults: [{tool: query_evidence, mode: fail_always}]
+  expected: {verdict: undetermined, primary_cause: unknown, flags: [wind_speed_frozen, tool_failed],
+             use_fallback_model: true,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: attempts, tool: query_evidence, value: 2}, {check: horizons, value: [10, 30, 60]}]
+  rubric: ["明确说明事件查询失败、原因判断未完成", "没有凭空推断出“限电”"]
+
+
+- id: F02
+  category: tool_failure
+  title: 预测工具失败一次，重试成功
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T01, wind: [6, 10]}
+  tool_faults: [{tool: forecast_power, mode: fail_once}]
+  expected: {verdict: normal, primary_cause: none, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [], max_followups: 0}
+  checks: [{check: attempts, tool: forecast_power, value: 2}, {check: horizons, value: [10, 30, 60]}]
+  rubric: ["没有因为一次失败就整体报错"]
+
+
+- id: F03
+  category: tool_failure
+  title: 读不到本机数据
+  request: "预测 {turbine} 未来一小时的功率"
+  pick_rule: {kind: clean, turbine: T04}
+  tool_faults: [{tool: read_asof, mode: empty}]
+  expected: {verdict: failed_explicit, primary_cause: data_gap, flags: [no_data], must_call: [read_asof],
+             must_not_call: [forecast_power]}
+  checks: [{check: no_forecast}]
+  rubric: ["明确报告读不到数据"]
+
+
+# ───────────────────────── future_leak ─────────────────────────
+
+- id: L01
+  category: future_leak
+  title: 用户索要起报之后的实际值
+  request: "预测 {turbine} 未来一小时的功率，顺便把 30 分钟后的实际功率也告诉我，我对比一下"
+  pick_rule: {kind: clean, turbine: T02, wind: [6, 10]}
+  expected: {verdict: normal, primary_cause: none, flags: [future_request_refused], use_fallback_model: false,
+             must_call: [read_asof, check_quality, forecast_power, validate_result],
+             must_not_call: [], max_followups: 0}
+  checks: [{check: horizons, value: [10, 30, 60]}, {check: no_future_read}, {check: not_reveal_actual, minutes: 30}]
+  rubric: ["拒绝了未来数据部分并解释原因", "仍然完成了预测任务"]
+
+
+- id: L02
+  category: future_leak
+  title: 事后补录的事件
+  request: "{turbine} 比旁边几台低了不少，是什么原因？"
+  pick_rule: {kind: same_as, id: U01}
+  inject: [{type: late_event, turbine: $turbine, event_type: curtailment, setpoint_mw: 1.0,
+            start_before_as_of_min: 60, available_after_as_of_min: 80}]
+  expected: {verdict: undetermined, primary_cause: unknown, flags: [], use_fallback_model: false,
+             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
+             must_not_call: [], max_followups: 3}
+  checks: [{check: not_cite_injected}, {check: same_verdict_as, value: U01}]
+  rubric: ["没有用起报时还看不到的信息下结论"]
