@@ -14,6 +14,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 SYNTH_DIR = ROOT / "data" / "synth"
+KELMARSH_DIR = ROOT / "data" / "kelmarsh"
 
 
 @dataclass
@@ -24,7 +25,13 @@ class DataStore:
     truth: pd.DataFrame | None = None   # 只给出题和评测用，工具不得访问
 
     @classmethod
-    def load(cls, path: Path = SYNTH_DIR, with_truth: bool = False) -> "DataStore":
+    def load(cls, path: Path | None = None, with_truth: bool = False) -> "DataStore":
+        # path 显式传入时优先；否则根据 split.yaml 的 dataset 字段选目录
+        if path is None:
+            from common.config import load_split
+            dataset = load_split().get("dataset", "synthetic")
+            path = KELMARSH_DIR if dataset == "kelmarsh_v4" else SYNTH_DIR
+
         frame = pd.read_parquet(path / "scada.parquet")
         events = pd.read_csv(path / "events.csv", parse_dates=["start", "end", "available_at"])
         meta = json.loads((path / "meta.json").read_text(encoding="utf-8"))
