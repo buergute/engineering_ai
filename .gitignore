@@ -31,3 +31,4 @@ venv/
 
 # 合成数据仅用于流程验证
 data/synth/
+data/kelmarsh/
