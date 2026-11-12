@@ -53,9 +53,11 @@ def fit_reference(store: DataStore, split: dict) -> dict:
         p, w = tr[f"p_{t}"].copy(), tr[f"w_{t}"]
         for _, e in ev[ev.turbine == t].iterrows():          # 剔除有记录的限电和停机时段
             p.loc[e.start:e.end] = np.nan
-        ok = p.notna() & w.notna()
+        ok = p.notna() & w.notna() & (p > 0.02) & (w <= 20)
         cat = pd.cut(w[ok], bins)
-        med = p[ok].groupby(cat, observed=True).median()
+        grp = p[ok].groupby(cat, observed=True)
+        med, cnt = grp.median(), grp.count()
+        med = med[cnt >= 20]      # 每箱至少 20 个样本：稀疏箱集中在高风速尾部，多为阵风切出的过渡样本
         centers = [float(iv.mid) for iv in med.index]
         curves[t] = {"ws": centers, "mw": [round(float(v), 4) for v in med.values]}
         ratios[t] = {}
