@@ -5,7 +5,7 @@
 #   - 每段都是整年，季节成分一致；段与段之间留 1 天空隔，预测目标不会跨段
 # 当前日期针对合成数据（datagen/synth.py，2019–2023）。换成 Kelmarsh 后，A 先核对各年数据有效率再定稿。
 
-dataset: synthetic          # 换真实数据后改为 kelmarsh_v4
+dataset: kelmarsh_v4          # 换真实数据后改为 kelmarsh_v4
 turbines: [T01, T02, T03, T04, T05, T06]
 resolution_minutes: 10
 horizons_minutes: [10, 30, 60]
