@@ -3,7 +3,7 @@
 #   - 模型、经验功率曲线、邻机风速比例都只用 train 段拟合
 #   - 早停、阈值只在 val 段选择；区间校准只用 calib 段；test 段只在最终评测时用
 #   - 每段都是整年，季节成分一致；段与段之间留 1 天空隔，预测目标不会跨段
-# 当前日期针对合成数据（datagen/synth.py，2019–2023）。换成 Kelmarsh 后，A 先核对各年数据有效率再定稿。
+# 日期为 Kelmarsh v4 各年，A 已核验各年数据有效率后定稿（train 2019-20 / val 2021 / calib 2022 / test 2023）
 
 dataset: kelmarsh_v4          # 换真实数据后改为 kelmarsh_v4
 turbines: [T01, T02, T03, T04, T05, T06]
