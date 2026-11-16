@@ -220,7 +220,12 @@ def report(df, strata, bundle, split_name):
     for m in METHODS[4:]:
         delta = by_method[m][["coverage", "width"]] - qa[["coverage", "width"]]
         ablations.append(delta.assign(ablation=m).reset_index())
-    return "\n\n".join([f"# 预测评测 · {bundle['dataset']} · {split_name}",
+    heading = f"# 预测评测 · {bundle['dataset']} · {split_name}"
+    if split_name == "test" and bundle["dataset"] == "kelmarsh_v4":
+        period = bundle["splits"]["test"]
+        if period["start"][:4] == period["end"][:4] == "2023":
+            heading += "\n\nA 在此前汇报的基线评测中已使用 Kelmarsh 2023 测试段。是否根据该结果调整过模型、阈值或评测方案尚未确认。后续在同一时段得到的结果应标为复评。"
+    return "\n\n".join([heading,
         f"模型 {bundle['version']}。MAE 与宽度单位 MW，nMAE 为额定容量比例，skill_pct 为相对持续性的 MAE 提升百分比。方括号为按起报日整块抽样的 95% 区间。",
         table.to_markdown(index=False), "## H1",
         "按配对点估计判断：质量感知 MAE 更小且覆盖率不低于补值模型；三个时距均满足才计入成立场景。此判定不代表差异显著。",
