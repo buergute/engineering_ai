@@ -12,4 +12,4 @@ H1 采用预先固定的描述性标准：同场景、同时距下，质量感�
 
 ## 正式结果
 
-待冻结后运行一次 `python -m eval.numeric`。脚本生成表 1、H1 分场景结论、消融差值和欠覆盖分层，见 [正式表 1](../outputs/numeric_results.md) 和 [风速分层诊断](../outputs/wind_coverage.csv)。使用前核对文件中的数据集与切分；旧合成产物不可引用。开发验证输出在 `outputs/forecast_validation/`；val 同时用于早停，校准来自随后年份，因此开发段指标仅用于核对实现。A 在此前汇报的基线评测中已使用 Kelmarsh 2023 测试段。是否根据该结果调整过模型、阈值或评测方案尚未确认。后续在同一时段得到的结果应标为复评。
+待冻结后运行一次 `python -m eval.numeric`。脚本生成表 1、H1 分场景结论、消融差值和欠覆盖分层，见 [正式表 1](../outputs/numeric_results.md) 和 [风速分层诊断](../outputs/wind_coverage.csv)。使用前核对文件中的数据集与切分；旧合成产物不可引用。开发验证输出在 `outputs/forecast_validation/`；val 同时用于早停，校准来自随后年份，因此开发段指标仅用于核对实现。A 在此前汇报的基线评测中已使用 Kelmarsh 2023 测试段。据组内确认，A 未依据该次基线结果调整模型或阈值。后续在同一时段得到的结果应标为复评。
