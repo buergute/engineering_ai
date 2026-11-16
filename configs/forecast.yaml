@@ -1,0 +1,13 @@
+seed: 42
+bootstrap_draws: 2000
+origins_per_scenario: 6000
+wind_cuts_ms: [6, 12]
+# 与 prep/kelmarsh.py 对齐，用于只读 SCADA 的预测验证。
+kelmarsh_rated_mw: 2.05
+kelmarsh_neighbors:
+  T01: [T02]
+  T02: [T01, T03]
+  T03: [T02, T04]
+  T04: [T03, T05]
+  T05: [T04, T06]
+  T06: [T05]

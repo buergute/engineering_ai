@@ -33,6 +33,8 @@ def coverage(y, lower, upper) -> float:
 
 def mean_width(lower, upper) -> float:
     return float(np.mean(np.asarray(upper, float) - np.asarray(lower, float)))
+
+
 def daily_block_bootstrap(dates, *arrays, statistic, n_bootstrap: int = 2000,
                           confidence: float = 0.95, seed: int = 0):
     """按日期整块重采样，返回统计量及百分位置信区间。
@@ -67,3 +69,17 @@ def daily_block_bootstrap(dates, *arrays, statistic, n_bootstrap: int = 2000,
     alpha = (1 - confidence) / 2
     low, high = np.quantile(samples, [alpha, 1 - alpha])
     return estimate, float(low), float(high)
+
+
+def paired_daily_means(values, dates, draws, seed):
+    """Bootstrap aligned columns with the same daily multiplicities and row weights."""
+    import pandas as pd
+
+    daily = pd.DataFrame(values).set_axis(pd.DatetimeIndex(dates).normalize()).groupby(level=0)
+    totals = daily.sum().to_numpy()
+    counts = daily.size().to_numpy()
+    if not len(counts) or not np.isfinite(values).all() or draws < 1:
+        raise ValueError("需要非空、有限且配对的观测")
+    rng = np.random.default_rng(seed)
+    weights = rng.multinomial(len(counts), np.full(len(counts), 1 / len(counts)), size=draws)
+    return totals.sum(axis=0) / counts.sum(), (weights @ totals) / (weights @ counts)[:, None]

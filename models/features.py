@@ -85,7 +85,11 @@ def is_degraded(X: pd.DataFrame) -> pd.Series:
 
 def targets(frame: pd.DataFrame, turbine: str) -> dict[int, pd.Series]:
     p = frame[f"p_{turbine}"]
-    return {h: p.shift(-s) for h, s in HORIZON_STEPS.items()}
+    # 按实际时刻查目标：即使缺整行，也不能把下一条观测当作十分钟后。
+    return {h: p.reindex(p.index + pd.Timedelta(minutes=h)).set_axis(p.index)
+            for h in HORIZON_STEPS}
+
+
 def features_at(frame: pd.DataFrame, as_of, turbine: str, *, fallback: bool = False,
                 quality_features: bool = True, window_steps: int = 36) -> pd.Series:
     """Build features from observations available at or before as_of.
