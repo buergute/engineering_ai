@@ -225,6 +225,8 @@ def report(df, strata, bundle, split_name):
         period = bundle["splits"]["test"]
         if period["start"][:4] == period["end"][:4] == "2023":
             heading += "\n\nA 在此前汇报的基线评测中已使用 Kelmarsh 2023 测试段。据组内确认，A 未依据该次基线结果调整模型或阈值。后续在同一时段得到的结果应标为复评。"
+        elif period["start"][:4] == period["end"][:4] == "2024":
+            heading += "\n\n本次按用户授权在 2024 年评测。2024 是否曾被其他组员用于开发尚未确认。2023 已被 A 用于基线评测，组内确认未据此调整模型或阈值。"
     return "\n\n".join([heading,
         f"模型 {bundle['version']}。MAE 与宽度单位 MW，nMAE 为额定容量比例，skill_pct 为相对持续性的 MAE 提升百分比。方括号为按起报日整块抽样的 95% 区间。",
         table.to_markdown(index=False), "## H1",
