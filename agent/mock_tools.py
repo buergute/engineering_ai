@@ -4,9 +4,9 @@
 
 场景：
   curtailment  T03 风速读数冻结 + 起报前有限功率事件（默认演示场景）
-  no_event     T03 风速读数冻结且欠发，但查不到任何事件 → 应输出“无法确定”
+  no_event     T03 清洁输入下存在明显欠发，但查不到任何事件 → 应输出“无法确定”
   normal       数据正常 → 走常规流程，不补查
-  tool_failure query_evidence 持续失败 → 应重试一次后降级
+  tool_failure 清洁输入下存在明显欠发，query_evidence 持续失败 → 应重试一次后降级
 """
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ SCENARIOS = ("curtailment", "no_event", "normal", "tool_failure")
 def mock_toolbox(scenario: str = "curtailment") -> Toolbox:
     if scenario not in SCENARIOS:
         raise ValueError(f"未知场景 {scenario}，可选：{SCENARIOS}")
-    frozen = scenario != "normal"
+    # no_event 和 tool_failure 必须模拟干净数据；不然状态机正确地会
+    # 优先判为 data_issue_only，而不是这两个测试所要覆盖的 undetermined。
+    frozen = scenario == "curtailment"
 
     def read_asof(turbine, as_of, window_hours=7.0, include_neighbors=True):
         if turbine not in [f"T0{i}" for i in range(1, 7)]:
@@ -43,9 +45,11 @@ def mock_toolbox(scenario: str = "curtailment") -> Toolbox:
     def check_power_curve(data, turbine, wind_source="own", exclude_neighbors=()):
         if wind_source == "neighbors":
             wind, expected = 9.5, 1.7
+        elif scenario in ("no_event", "tool_failure"):
+            wind, expected = 9.5, 1.7
         else:
             wind, expected = (7.32, 1.0) if frozen else (9.4, 1.62)
-        actual = 0.9 if frozen else 1.6
+        actual = 0.9 if scenario in ("curtailment", "no_event", "tool_failure") else 1.6
         return ToolResult(tool="check_power_curve", status="ok", as_of=data.as_of, data_hash=data.data_hash,
                           tool_version="mock", evidence_ids=["C1"],
                           result={"wind_source": wind_source, "neighbors_used": ["T02", "T04"],

@@ -69,7 +69,9 @@ def main(n_clean: int = 3000) -> None:
         rv["ws"].append(float(np.nanmean(ws)))
         rv["wm"].append(float(np.nanmean(w)))
         if np.mean(w) < 10.5:
-            rv["pitch"].append(float(np.nanmean(F[f"pt_{tb}"].to_numpy()[i - 2:i + 1])))
+            pitch_window = F[f"pt_{tb}"].to_numpy()[i - 2:i + 1]
+            if not np.isnan(pitch_window).all():
+                rv["pitch"].append(float(np.nanmean(pitch_window)))
 
     derate = {"own": [], "neighbors": [], "neighbors_1": []}
     tr = store.truth[(store.truth.type == "hidden_derate") & (store.truth.start >= split["start"])
@@ -90,8 +92,12 @@ def main(n_clean: int = 3000) -> None:
         c = np.array(clean[src], dtype=float)
         c = c[~np.isnan(c[:, 0])]
         thr = float(np.quantile(c[:, 0], FALSE_ALARM))
-        d = np.array(derate[src], dtype=float)
-        d = d[~np.isnan(d[:, 0])]
+        d = np.asarray(derate[src], dtype=float)
+        if d.size == 0:
+            d = np.empty((0, 2), dtype=float)
+        else:
+            d = d.reshape(-1, 2)
+            d = d[~np.isnan(d[:, 0])]
         result[src] = {"residual_alert_mw": round(thr, 3), "n_clean": len(c), "clean_p50": round(float(np.median(c[:, 0])), 3),
                        "clean_p01": round(thr, 3), "clean_p99": round(float(np.quantile(c[:, 0], 0.99)), 3),
                        "n_derate": len(d), "derate_detect_rate": round(float((d[:, 0] < thr).mean()), 3) if len(d) else None}
