@@ -112,7 +112,10 @@ def mask_to_episodes(
     if len(times) == 0:
         return []
 
-    cuts = np.where(np.diff(times.asi8) > 2 * STEP.value)[0] + 1
+    # 候选必须在每一个 10 分钟采样点连续命中。20 分钟的间隔表示中间
+    # 有一个正常、缺失或停机点，不能被并入同一个长时事件。
+    gaps = times[1:] - times[:-1]
+    cuts = np.flatnonzero(gaps > STEP) + 1
     groups = np.split(times, cuts)
 
     raw = []

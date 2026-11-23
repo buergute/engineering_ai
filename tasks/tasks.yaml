@@ -288,17 +288,17 @@
 
 - id: F01
   category: tool_failure
-  title: 事件查询一直失败
+  title: 事件查询失败，但字段显示停机
   request: "预测 {turbine} 未来一小时的功率，并解释它为什么比相邻机组低"
   pick_rule: {kind: same_as, id: O01}
   inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
   tool_faults: [{tool: query_evidence, mode: fail_always}]
-  expected: {verdict: undetermined, primary_cause: unknown, flags: [wind_speed_frozen, tool_failed],
+  expected: {verdict: operating_change, primary_cause: stop, flags: [wind_speed_frozen, tool_failed],
              use_fallback_model: true,
              must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
              must_not_call: [], max_followups: 3}
   checks: [{check: attempts, tool: query_evidence, value: 2}, {check: horizons, value: [10, 30, 60]}]
-  rubric: ["明确说明事件查询失败、原因判断未完成", "没有凭空推断具体运行状态"]
+  rubric: ["事件查询失败后，仍根据转速或桨距角字段识别停机", "明确说明停机的字段证据与事件查询失败"]
 
 
 - id: F02
