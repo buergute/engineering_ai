@@ -100,9 +100,27 @@ def main() -> None:
     store = DataStore.load(with_truth=True)
     pk = Picker(store)
     cases: list[dict] = []
+    unavailable: list[tuple[str, str, str]] = []
 
     def add(kind, sub, picks, inject=None):
-        cases.extend({"cls": kind, "sub": sub, "turbine": tb, "as_of": t, "inject": inject} for tb, t in picks)
+        picks = list(picks)
+
+        if not picks:
+            unavailable.append(
+                (kind, sub, "真实数据中没有满足当前真值规则的候选样本")
+            )
+            return
+
+        cases.extend(
+            {
+                "cls": kind,
+                "sub": sub,
+                "turbine": tb,
+                "as_of": t,
+                "inject": inject,
+            }
+            for tb, t in picks
+        )
 
     add("normal", "随机正常时刻", sample_clean(pk, rng, 5 * n))
     add("wind_change", "单机阵风",
@@ -115,7 +133,7 @@ def main() -> None:
         "风速计冻结": ([{"type": "freeze", "field": "wind_speed", "duration_min": 80}], dict(wind=(5, 11), ptp=1.5)),
         "功率冻结": ([{"type": "freeze", "field": "power", "duration_min": 60}], dict(wind=(5, 11))),
         "连续掉线": ([{"type": "contiguous_dropout", "fields": "all", "duration_min": 120}], dict(wind=(5, 11))),
-        "两个风速计矛盾": ([{"type": "anemometer_mismatch", "factor": 0.25, "duration_min": 60}], dict(wind=(5, 11))),
+        "两个风速计矛盾": ([{"type": "anemometer_mismatch", "factor": -0.25, "duration_min": 60}], dict(wind=(5, 11))),
         "风速计缓慢漂移": ([{"type": "slow_drift", "field": "wind_speed", "drift_per_day": 0.5, "days": 3}],
                      dict(wind=(6, 10), quiet_steps=76 * 6)),
     }
@@ -144,6 +162,8 @@ def main() -> None:
     lines = ["# 结果表 2：检测与复核（合成数据，仅说明流程可用）", "",
              "“结论正确”= 结论与真值一致；“报警”= 结论不是 normal。95% 区间为 Wilson 区间。", "",
              "| 类别 | 子类 | 题数 | 结论正确 | 报警 | 错判成 |", "| --- | --- | --- | --- | --- | --- |"]
+    for cls, sub, reason in unavailable:
+        lines.append(f"| {cls} | {sub} | N/A | N/A | N/A | {reason} |")
     summary = defaultdict(lambda: [0, 0, 0])
     for (cls, sub), g in df.groupby(["cls", "sub"], sort=False):
         ok = int(g.verdict.isin(WANT[cls]).sum())

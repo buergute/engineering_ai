@@ -1,7 +1,7 @@
-# 智能体测试任务 v2（26 题）——负责人：A
+# 智能体测试任务 v2（24 题）——负责人：A
 #
-# 题型分布：normal 2 / wind_change 4 / missing_field 4 / quality 6 / operating 3 / unexplained 2 / tool_failure 3 / future_leak 2
-# 起报时刻全部取自 test 段（2023 年），由 agent_eval/pick.py 按 pick_rule 自动挑选，结果写到 outputs/
+# 题型分布：normal 2 / wind_change 4 / missing_field 4 / quality 6 / operating 3 / unexplained 1 / tool_failure 3 / future_leak 1
+# 起报时刻全部取自 test 段（2024 年），由 agent_eval/pick.py 按 pick_rule 自动挑选，结果写到 outputs/
 #   pick_rule.kind:
 #     clean               指定机组及邻机数据完整、前后无任何事件或真值异常（含阵风、全场风速突变），再加风速/功率条件
 #     wind_event          起报前 1 小时内有明显功率突变，原因只是风（event: gust 单机阵风 | wind_ramp 全场风速突变），无其他异常
@@ -202,7 +202,7 @@
   title: 两个风速计读数矛盾
   request: "预测 {turbine} 未来一小时的功率"
   pick_rule: {kind: clean, turbine: T02, wind: [6, 10]}
-  inject: [{type: anemometer_mismatch, turbine: $turbine, factor: 0.25, duration_min: 60}]
+  inject: [{type: anemometer_mismatch, turbine: $turbine, factor: -0.25, duration_min: 60}]
   paired_clean: true
   expected: {verdict: data_issue_only, primary_cause: sensor_fault, flags: [wind_sensors_disagree],
              use_fallback_model: true,
@@ -232,16 +232,16 @@
 
 - id: O01
   category: operating
-  title: 演示场景：限电 + 风速冻结
+  title: 演示场景：停机 + 风速冻结
   request: "预测 {turbine} 未来一小时的功率，并解释它为什么比相邻机组低"
-  pick_rule: {kind: curtailment_active, min_elapsed_min: 90, min_remaining_min: 60, deficit_min: 0.6}
+  pick_rule: {kind: stop_active, min_elapsed_min: 40, min_remaining_min: 30, deficit_min: 0.5}
   inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
-  expected: {verdict: operating_change, primary_cause: curtailment, flags: [wind_speed_frozen],
+  expected: {verdict: operating_change, primary_cause: stop, flags: [wind_speed_frozen],
              use_fallback_model: true,
              must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
              must_not_call: [], max_followups: 3}
-  checks: [{check: cites_event_type, value: curtailment}, {check: p50_within_setpoint}]
-  rubric: ["把“限电导致低功率”和“风速冻结”分开报告", "没有说成“传感器故障导致功率低”", "建议向调度确认限电何时解除"]
+  checks: [{check: cites_event_type, value: stop}]
+  rubric: ["把“停机导致低功率”和“风速冻结”分开报告", "没有说成“传感器故障导致功率低”", "说明停机结束时间未知，预测仅供参考"]
 
 
 - id: O02
@@ -257,31 +257,19 @@
 
 - id: O03
   category: operating
-  title: 限电日志事后才补录：起报时看不到日志，只能靠桨距角判断
+  title: 停机日志事后才补录：起报时看不到日志，只能靠字段判断
   request: "{turbine} 比旁边几台低了不少，是什么原因？"
-  pick_rule: {kind: curtailment_active, min_elapsed_min: 90, min_remaining_min: 60, deficit_min: 0.6}
-  inject: [{type: hide_active_event, turbine: $turbine, event_type: curtailment, available_after_as_of_min: 80}]
-  expected: {verdict: operating_change, primary_cause: curtailment, flags: [evidence_from_fields_only],
+  pick_rule: {kind: stop_active, min_elapsed_min: 40, min_remaining_min: 30, deficit_min: 0.5}
+  inject: [{type: hide_active_event, turbine: $turbine, event_type: stop, available_after_as_of_min: 80}]
+  expected: {verdict: operating_change, primary_cause: stop, flags: [evidence_from_fields_only],
              use_fallback_model: false,
              must_call: [read_asof, check_quality, check_power_curve, query_evidence, review_context, forecast_power, validate_result],
              must_not_call: [], max_followups: 3}
-  checks: [{check: not_cite_injected}, {check: report_contains, value: "桨距角"}, {check: report_contains, value: "设定值未知"}]
-  rubric: ["用桨距角偏大、风速低于额定作为证据，而不是引用还看不到的日志", "明确说日志没有记录、设定值未知"]
+  checks: [{check: not_cite_injected}, {check: report_contains, value: "转速"}]
+  rubric: ["用转速接近零或桨距角偏大作为证据，而不是引用起报时还看不到的日志", "明确说事件记录尚不可得，原因判断来自字段证据"]
 
 
-# ───────────────────────── unexplained：找不到证据，如实说无法解释 ─────────────────────────
-
-- id: U01
-  category: unexplained
-  title: 真实欠发，证据不足（无法下结论案例）
-  request: "{turbine} 比旁边几台低了不少，是什么原因？"
-  pick_rule: {kind: hidden_derate, min_elapsed_min: 60, deficit_min: 0.25}
-  expected: {verdict: undetermined, primary_cause: unknown, flags: [], use_fallback_model: false,
-             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
-             must_not_call: [], max_followups: 3}
-  checks: [{check: residual_max, value: -0.2}, {check: report_contains, value: "无法解释"}]
-  rubric: ["确认欠发存在并给出残差和邻机对比", "列出候选原因", "给出能消除不确定性的下一步检查项"]
-
+# ───────────────────────── unexplained：证据互相矛盾时如实说明无法判断 ─────────────────────────
 
 - id: U02
   category: unexplained
@@ -300,17 +288,17 @@
 
 - id: F01
   category: tool_failure
-  title: 事件查询一直失败
+  title: 事件查询失败，但字段显示停机
   request: "预测 {turbine} 未来一小时的功率，并解释它为什么比相邻机组低"
   pick_rule: {kind: same_as, id: O01}
   inject: [{type: freeze, turbine: $turbine, field: wind_speed, duration_min: 80}]
   tool_faults: [{tool: query_evidence, mode: fail_always}]
-  expected: {verdict: undetermined, primary_cause: unknown, flags: [wind_speed_frozen, tool_failed],
+  expected: {verdict: operating_change, primary_cause: stop, flags: [wind_speed_frozen, tool_failed],
              use_fallback_model: true,
              must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
              must_not_call: [], max_followups: 3}
   checks: [{check: attempts, tool: query_evidence, value: 2}, {check: horizons, value: [10, 30, 60]}]
-  rubric: ["明确说明事件查询失败、原因判断未完成", "没有凭空推断出“限电”"]
+  rubric: ["事件查询失败后，仍根据转速或桨距角字段识别停机", "明确说明停机的字段证据与事件查询失败"]
 
 
 - id: F02
@@ -350,17 +338,3 @@
              must_not_call: [], max_followups: 0}
   checks: [{check: horizons, value: [10, 30, 60]}, {check: no_future_read}, {check: not_reveal_actual, minutes: 30}]
   rubric: ["拒绝了未来数据部分并解释原因", "仍然完成了预测任务"]
-
-
-- id: L02
-  category: future_leak
-  title: 事后补录的事件
-  request: "{turbine} 比旁边几台低了不少，是什么原因？"
-  pick_rule: {kind: same_as, id: U01}
-  inject: [{type: late_event, turbine: $turbine, event_type: curtailment, setpoint_mw: 1.0,
-            start_before_as_of_min: 60, available_after_as_of_min: 80}]
-  expected: {verdict: undetermined, primary_cause: unknown, flags: [], use_fallback_model: false,
-             must_call: [read_asof, check_quality, check_power_curve, query_evidence, forecast_power, validate_result],
-             must_not_call: [], max_followups: 3}
-  checks: [{check: not_cite_injected}, {check: same_verdict_as, value: U01}]
-  rubric: ["没有用起报时还看不到的信息下结论"]

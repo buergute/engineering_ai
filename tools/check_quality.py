@@ -77,22 +77,55 @@ def check_quality(data: ToolResult, rated_mw: float = 2.05) -> ToolResult:
     unreliable = {i["turbine"] for i in issues if i["field"] == "wind_speed" and i["type"] in ("frozen", "gap")}
     w_own, p_own = df[f"w_{own}"], df[f"p_{own}"]
     implied = pd.Series(implied_wind(own, p_own.to_numpy()), index=df.index)
-    dev_w, dev_p = [], []
+        # 只采用“功率反推风速与邻机一致”的邻机作为漂移参照。
+    # 若某台邻机本身与本机功率关系异常，不能让它否决其他有效邻机证据。
+    drift_evidence = []
+
     for n in nbrs:
         if n in unreliable:
             continue
+
         w_n = df[f"w_{n}"]
-        ok = (w_own > 4) & (w_n > 4) & (p_own > 0.1) & (p_own < 0.93 * rated_mw)
-        if ok.sum() >= 12:
-            dev_w.append(float((w_own[ok] / w_n[ok]).median() / ref[n] - 1))
-            dev_p.append(float((implied[ok] / w_n[ok]).median() / ref[n] - 1))
-    gap = [w - p for w, p in zip(dev_w, dev_p)]
-    if own not in unreliable and dev_w and min(abs(d) for d in dev_w) > DRIFT_TOL \
-            and len({np.sign(d) for d in dev_w}) == 1 and min(abs(g) for g in gap) > DRIFT_TOL \
-            and max(abs(d) for d in dev_p) < 0.1:
-        add(own, "wind_speed", "drift", 36,
-            f"风速比邻机系统性偏{'高' if dev_w[0] > 0 else '低'}约 {abs(np.mean(dev_w)):.0%}，"
-            f"但按功率反推的等效风速与邻机一致（偏差 {abs(np.mean(dev_p)):.0%}），疑似风速计漂移")
+        ok = (
+            (w_own > 4)
+            & (w_n > 4)
+            & (p_own > 0.1)
+            & (p_own < 0.93 * rated_mw)
+        )
+
+        if ok.sum() < 12:
+            continue
+
+        wind_deviation = float(
+            (w_own[ok] / w_n[ok]).median() / ref[n] - 1
+        )
+        implied_deviation = float(
+            (implied[ok] / w_n[ok]).median() / ref[n] - 1
+        )
+
+        if abs(implied_deviation) < 0.1:
+            drift_evidence.append((wind_deviation, implied_deviation))
+
+    if own not in unreliable and drift_evidence:
+        dev_w = [item[0] for item in drift_evidence]
+        dev_p = [item[1] for item in drift_evidence]
+        gap = [wind_value - power_value for wind_value, power_value in zip(dev_w, dev_p)]
+
+        if (
+            min(abs(value) for value in dev_w) > DRIFT_TOL
+            and len({np.sign(value) for value in dev_w}) == 1
+            and min(abs(value) for value in gap) > DRIFT_TOL
+        ):
+            add(
+                own,
+                "wind_speed",
+                "drift",
+                36,
+                f"风速比邻机系统性偏{'高' if dev_w[0] > 0 else '低'}约 "
+                f"{abs(np.mean(dev_w)):.0%}，"
+                f"但按功率反推的等效风速与邻机一致"
+                f"（偏差 {abs(np.mean(dev_p)):.0%}），疑似风速计漂移",
+            )
 
     flags = {t: sorted({f"{i['field']}:{i['type']}" for i in issues if i["turbine"] == t}) for t in [own, *nbrs]}
     return ToolResult(tool="check_quality", status="ok", as_of=data.as_of, data_hash=data.data_hash,
